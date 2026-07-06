@@ -2,9 +2,54 @@
 
 from collections import Counter
 
+import pandas as pd
 import pytest
 
 from tools.optimizer import optimize_lineup
+
+
+def _uploaded_pool_df(include_popularity: bool = True, include_risk: bool = True):
+    rows = [
+        {
+            "box": 1,
+            "name": "Safe Player",
+            "team": "DAL",
+            "projected_points": 10,
+            "popularity": 1.0,
+            "risk": "low",
+        },
+        {
+            "box": 1,
+            "name": "Contrarian Player",
+            "team": "MIN",
+            "projected_points": 9,
+            "popularity": 0.0,
+            "risk": "low",
+        },
+        {
+            "box": 2,
+            "name": "Preferred Player",
+            "team": "WPG",
+            "projected_points": 10,
+            "popularity": 0.5,
+            "risk": "low",
+        },
+        {
+            "box": 2,
+            "name": "Slightly Better Player",
+            "team": "COL",
+            "projected_points": 12,
+            "popularity": 0.5,
+            "risk": "low",
+        },
+    ]
+    if not include_popularity:
+        for row in rows:
+            row.pop("popularity")
+    if not include_risk:
+        for row in rows:
+            row.pop("risk")
+    return pd.DataFrame(rows)
 
 
 def test_optimize_lineup_selects_one_player_from_each_box():
@@ -152,3 +197,99 @@ def test_optimize_lineup_rejects_invalid_risk_mode():
                 "banned_teams": [],
             }
         )
+
+
+def test_optimize_lineup_uses_provided_pool_dataframe():
+    result = optimize_lineup(
+        {
+            "risk_mode": "balanced",
+            "strategy": "balanced",
+            "locked_players": [],
+            "banned_players": [],
+            "banned_teams": [],
+            "preferred_teams": [],
+        },
+        pool_df=_uploaded_pool_df(),
+    )
+
+    assert [player["box"] for player in result["lineup"]] == ["1", "2"]
+    assert [player["name"] for player in result["lineup"]] == [
+        "Safe Player",
+        "Slightly Better Player",
+    ]
+
+
+def test_optimize_lineup_requires_projected_points_for_dataframe():
+    pool_df = pd.DataFrame(
+        [
+            {
+                "box": 1,
+                "name": "Safe Player",
+                "team": "DAL",
+            }
+        ]
+    )
+
+    with pytest.raises(ValueError, match="Optimization requires projected_points"):
+        optimize_lineup(
+            {
+                "risk_mode": "balanced",
+                "strategy": "balanced",
+                "locked_players": [],
+                "banned_players": [],
+                "banned_teams": [],
+            },
+            pool_df=pool_df,
+        )
+
+
+def test_optimize_lineup_treats_missing_popularity_as_balanced_strategy():
+    result = optimize_lineup(
+        {
+            "risk_mode": "balanced",
+            "strategy": "contrarian",
+            "locked_players": [],
+            "banned_players": [],
+            "banned_teams": [],
+        },
+        pool_df=_uploaded_pool_df(include_popularity=False),
+    )
+
+    box_one_player = next(player for player in result["lineup"] if player["box"] == "1")
+
+    assert box_one_player["name"] == "Safe Player"
+
+
+def test_optimize_lineup_treats_missing_risk_as_balanced_risk_mode():
+    result = optimize_lineup(
+        {
+            "risk_mode": "safe",
+            "strategy": "balanced",
+            "locked_players": [],
+            "banned_players": [],
+            "banned_teams": [],
+        },
+        pool_df=_uploaded_pool_df(include_risk=False),
+    )
+
+    assert len(result["lineup"]) == 2
+
+
+def test_optimize_lineup_respects_constraints_with_dataframe():
+    result = optimize_lineup(
+        {
+            "risk_mode": "balanced",
+            "strategy": "balanced",
+            "locked_players": ["Contrarian Player"],
+            "banned_players": ["Slightly Better Player"],
+            "banned_teams": [],
+            "preferred_teams": ["WPG"],
+        },
+        pool_df=_uploaded_pool_df(),
+    )
+
+    selected_names = [player["name"] for player in result["lineup"]]
+
+    assert "Contrarian Player" in selected_names
+    assert "Slightly Better Player" not in selected_names
+    assert "Preferred Player" in selected_names

@@ -1,4 +1,5 @@
 google-adk
 mcp
+pandas
 streamlit
 pytest

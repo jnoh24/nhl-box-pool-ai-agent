@@ -5,6 +5,8 @@ from collections import defaultdict
 from collections.abc import Mapping
 from pathlib import Path
 
+import pandas as pd
+
 from tools.scoring import score_player
 from tools.validators import validate_preferences
 
@@ -22,6 +24,7 @@ REQUIRED_COLUMNS = {
     "popularity",
     "salary",
 }
+MINIMUM_POOL_COLUMNS = {"box", "name", "team", "projected_points"}
 EXPECTED_BOXES = {str(box) for box in range(1, 16)}
 
 
@@ -43,6 +46,63 @@ def _load_players(csv_path: Path) -> list[dict[str, object]]:
         ]
 
 
+def _load_players_from_dataframe(pool_df: pd.DataFrame) -> list[dict[str, object]]:
+    """Load player rows from an uploaded dataframe."""
+    normalized = pool_df.copy()
+    normalized.columns = [str(column).strip().lower() for column in normalized.columns]
+
+    missing_columns = MINIMUM_POOL_COLUMNS - set(normalized.columns)
+    if missing_columns:
+        missing = ", ".join(sorted(missing_columns))
+        if "projected_points" in missing_columns:
+            raise ValueError("Optimization requires projected_points in the player pool.")
+        raise ValueError(f"Player pool is missing required columns: {missing}.")
+
+    if "player_id" not in normalized.columns:
+        normalized["player_id"] = range(1, len(normalized) + 1)
+    if "position" not in normalized.columns:
+        normalized["position"] = "UNKNOWN"
+    if "injury_status" not in normalized.columns:
+        normalized["injury_status"] = "unknown"
+    if "salary" not in normalized.columns:
+        normalized["salary"] = 0
+
+    return [
+        _normalise_dataframe_row(row, row_number)
+        for row_number, row in enumerate(normalized.to_dict("records"), start=2)
+    ]
+
+
+def _normalise_dataframe_row(row: dict[str, object], row_number: int) -> dict[str, object]:
+    """Convert dataframe rows into the types expected by optimizer output."""
+    player = dict(row)
+    for field_name in ("box", "player_id", "name", "team", "position"):
+        if _is_missing(player.get(field_name)):
+            if field_name == "position":
+                player[field_name] = "UNKNOWN"
+            else:
+                raise ValueError(f"Row {row_number} must include a non-empty {field_name}.")
+
+    player["box"] = str(player["box"]).strip()
+    player["name"] = str(player["name"]).strip()
+    player["team"] = str(player["team"]).strip()
+    player["position"] = str(player.get("position", "UNKNOWN")).strip() or "UNKNOWN"
+    player["injury_status"] = (
+        str(player.get("injury_status", "unknown")).strip() or "unknown"
+    )
+    player["projected_points"] = _numeric_value(
+        player["projected_points"],
+        "projected_points",
+    )
+    player["popularity"] = _optional_numeric_value(player.get("popularity"), 0.5)
+    player["salary"] = _optional_numeric_value(player.get("salary"), 0)
+    if _is_missing(player.get("risk")):
+        player["risk"] = "low"
+    else:
+        player["risk"] = str(player["risk"]).strip()
+    return player
+
+
 def _normalise_player_row(row: dict[str, str], row_number: int) -> dict[str, object]:
     """Convert CSV text values into the types expected by optimizer output."""
     player = {key: row[key].strip() for key in REQUIRED_COLUMNS}
@@ -62,6 +122,20 @@ def _numeric_value(value: object, field_name: str) -> float:
         return float(value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Each player must include numeric {field_name}.") from exc
+
+
+def _optional_numeric_value(value: object, default: float) -> float:
+    """Convert an optional numeric field, falling back only when it is absent."""
+    if _is_missing(value):
+        return default
+    return _numeric_value(value, "optional numeric field")
+
+
+def _is_missing(value: object) -> bool:
+    """Return whether a dataframe value is blank or missing."""
+    if pd.isna(value):
+        return True
+    return str(value).strip() == ""
 
 
 def _projected_points(player: Mapping[str, object]) -> float:
@@ -186,20 +260,33 @@ def _player_for_scoring(player: Mapping[str, object]) -> dict[str, object]:
 def optimize_lineup(
     preferences: Mapping[str, object],
     csv_path: str | Path = DEFAULT_CSV_PATH,
+    pool_df: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     """Build one lineup by selecting exactly one player from each box.
 
     Locked players win automatically within their box. Otherwise, each box uses
     the highest adjusted score after banned teams, risk mode, and strategy are applied.
     """
+    risk_mode = str(preferences.get("risk_mode", "balanced"))
+    strategy = str(preferences.get("strategy", "balanced"))
+    if pool_df is not None:
+        columns = {str(column).strip().lower() for column in pool_df.columns}
+        if "projected_points" not in columns:
+            raise ValueError("Optimization requires projected_points in the player pool.")
+        if "popularity" not in columns:
+            strategy = "balanced"
+        if "risk" not in columns:
+            risk_mode = "balanced"
+
     validated_preferences = validate_preferences(
-        risk_mode=str(preferences.get("risk_mode", "balanced")),
-        strategy=str(preferences.get("strategy", "balanced")),
+        risk_mode=risk_mode,
+        strategy=strategy,
         csv_path=csv_path,
         locked_players=preferences.get("locked_players", []),
         banned_teams=preferences.get("banned_teams", []),
         banned_players=preferences.get("banned_players", []),
         preferred_teams=preferences.get("preferred_teams", []),
+        validate_csv=pool_df is None,
     )
     locked_and_banned = set(validated_preferences["locked_players"]) & set(
         validated_preferences["banned_players"]
@@ -208,9 +295,14 @@ def optimize_lineup(
         names = ", ".join(sorted(locked_and_banned))
         raise ValueError(f"Players cannot be both locked and banned: {names}.")
 
-    players = _load_players(validated_preferences["csv_path"])
+    players = (
+        _load_players_from_dataframe(pool_df)
+        if pool_df is not None
+        else _load_players(validated_preferences["csv_path"])
+    )
     boxes = _group_by_box(players)
-    _validate_boxes(boxes)
+    if pool_df is None:
+        _validate_boxes(boxes)
 
     lineup = []
     explanations = []

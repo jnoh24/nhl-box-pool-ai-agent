@@ -1,0 +1,5 @@
+box,name,team,position,projected_points,risk,injury_status,popularity,salary
+1,Player A,COL,C,50,low,healthy,0.7,8000
+1,Player B,EDM,C,60,low,healthy,0.9,9000
+2,Player C,WPG,LW,45,medium,healthy,0.5,6000
+2,Player D,TOR,RW,55,medium,healthy,0.8,7000

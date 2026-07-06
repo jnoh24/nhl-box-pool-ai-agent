@@ -167,16 +167,18 @@ def validate_preferences(
     banned_teams: object,
     banned_players: object | None = None,
     preferred_teams: object | None = None,
+    validate_csv: bool = True,
 ) -> dict[str, object]:
     """Validate all preference inputs and return normalized values."""
     validated_risk_mode = validate_risk_mode(risk_mode)
     validated_strategy = validate_strategy(strategy)
-    validated_csv_path = validate_csv_path(csv_path)
+    validated_csv_path = validate_csv_path(csv_path) if validate_csv else Path(csv_path)
     validated_locked_players = validate_locked_players(locked_players)
     validated_banned_players = validate_banned_players(banned_players or [])
     validated_banned_teams = validate_banned_teams(banned_teams)
     validated_preferred_teams = validate_preferred_teams(preferred_teams or [])
-    validate_csv_schema(validated_csv_path)
+    if validate_csv:
+        validate_csv_schema(validated_csv_path)
     return {
         "risk_mode": validated_risk_mode,
         "strategy": validated_strategy,
