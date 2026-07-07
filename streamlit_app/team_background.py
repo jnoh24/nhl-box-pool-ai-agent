@@ -96,7 +96,8 @@ def apply_team_background(
         <style>
         [data-testid="stApp"] {{
             position: relative;
-            background: #ffffff;
+            background: var(--background-color, #ffffff);
+            color: var(--text-color, #31333f);
         }}
 
         [data-testid="stApp"]::before {{
@@ -112,6 +113,15 @@ def apply_team_background(
             pointer-events: none;
         }}
 
+        [data-testid="stApp"] h1,
+        [data-testid="stApp"] h2,
+        [data-testid="stApp"] h3,
+        [data-testid="stApp"] p,
+        [data-testid="stApp"] label,
+        [data-testid="stApp"] [data-testid="stMarkdownContainer"] {{
+            color: var(--text-color, #31333f);
+        }}
+
         [data-testid="stHeader"],
         [data-testid="stSidebar"],
         [data-testid="stAppViewContainer"],
@@ -124,6 +134,27 @@ def apply_team_background(
             position: relative;
             z-index: 1;
             background: transparent;
+        }}
+
+        @media (prefers-color-scheme: dark) {{
+            [data-testid="stApp"] {{
+                background: var(--background-color, #0e1117);
+                color: var(--text-color, #fafafa);
+            }}
+
+            [data-testid="stApp"]::before {{
+                opacity: {max(opacity, 0.1)};
+                filter: saturate(0.95) brightness(1.08);
+            }}
+
+            [data-testid="stApp"] h1,
+            [data-testid="stApp"] h2,
+            [data-testid="stApp"] h3,
+            [data-testid="stApp"] p,
+            [data-testid="stApp"] label,
+            [data-testid="stApp"] [data-testid="stMarkdownContainer"] {{
+                color: var(--text-color, #fafafa);
+            }}
         }}
         </style>
         """,
