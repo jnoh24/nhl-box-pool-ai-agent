@@ -13,8 +13,10 @@ from mcp_server.server import (
 
 
 def test_parse_preferences_tool_returns_structured_preferences():
-    preferences = parse_preferences_tool("I really want McDavid and avoid Toronto")
+    result = parse_preferences_tool("I really want McDavid and avoid Toronto")
+    preferences = result["parsed_preferences"]
 
+    assert result["clarification_needed"] is False
     assert preferences["locked_players"] == ["Connor McDavid"]
     assert preferences["banned_teams"] == ["TOR"]
 

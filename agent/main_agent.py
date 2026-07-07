@@ -7,7 +7,7 @@ Google ADK. For now it coordinates parsing, optimization, and response writing.
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from agent.preference_parser import parse_preferences
+from agent.preference_parser import extract_parsed_preferences, parse_preferences
 from tools.optimizer import DEFAULT_CSV_PATH, optimize_lineup
 
 
@@ -31,7 +31,8 @@ class BoxPoolAdvisorAgent:
 
     def recommend(self, user_text: str) -> dict[str, object]:
         """Return structured recommendation data for apps and tools."""
-        preferences = self.parser(user_text)
+        parse_result = self.parser(user_text)
+        preferences = extract_parsed_preferences(parse_result)
         result = self.optimizer(preferences, self.csv_path)
         response = self._format_response(preferences, result)
         return {

@@ -2,11 +2,22 @@
 
 import pytest
 
-from agent.preference_parser import parse_preferences
+from agent.preference_parser import extract_parsed_preferences, parse_preferences
+from tools.optimizer import optimize_lineup
+
+
+def parsed(prompt: str) -> dict[str, object]:
+    """Return parsed preferences from the parser envelope."""
+    return extract_parsed_preferences(parse_preferences(prompt))
 
 
 def test_parse_preferences_returns_defaults_for_empty_text():
-    assert parse_preferences("") == {
+    result = parse_preferences("")
+
+    assert result["clarification_needed"] is False
+    assert result["clarification_question"] is None
+    assert result["clarification_options"] == []
+    assert result["parsed_preferences"] == {
         "locked_players": [],
         "banned_players": [],
         "banned_teams": [],
@@ -18,13 +29,15 @@ def test_parse_preferences_returns_defaults_for_empty_text():
 
 
 def test_parse_preferences_locks_mcdavid_from_natural_language():
-    preferences = parse_preferences("I really want McDavid")
+    result = parse_preferences("I really want McDavid")
+    preferences = extract_parsed_preferences(result)
 
+    assert result["clarification_needed"] is False
     assert preferences["locked_players"] == ["Connor McDavid"]
 
 
 def test_parse_preferences_bans_toronto():
-    preferences = parse_preferences("avoid Toronto")
+    preferences = parsed("avoid Toronto")
 
     assert preferences["banned_teams"] == ["TOR"]
 
@@ -39,7 +52,7 @@ def test_parse_preferences_bans_toronto():
     ],
 )
 def test_parse_preferences_bans_player_aliases(prompt, player_name):
-    preferences = parse_preferences(prompt)
+    preferences = parsed(prompt)
 
     assert preferences["banned_players"] == [player_name]
     assert preferences["locked_players"] == []
@@ -65,11 +78,11 @@ def test_parse_preferences_bans_player_aliases(prompt, player_name):
     ],
 )
 def test_parse_preferences_bans_team_aliases(prompt, team_code):
-    assert parse_preferences(prompt)["banned_teams"] == [team_code]
+    assert parsed(prompt)["banned_teams"] == [team_code]
 
 
 def test_parse_preferences_bans_edmonton_from_requested_prompt():
-    preferences = parse_preferences(
+    preferences = parsed(
         "give me the highest possible combination, but I don't want any players from Edmonton"
     )
 
@@ -108,60 +121,60 @@ def test_parse_preferences_bans_edmonton_from_requested_prompt():
     ],
 )
 def test_parse_preferences_detects_preferred_team_aliases(prompt, team_codes):
-    assert parse_preferences(prompt)["preferred_teams"] == team_codes
+    assert parsed(prompt)["preferred_teams"] == team_codes
 
 
 def test_parse_preferences_team_wants_do_not_lock_players():
-    preferences = parse_preferences("I really want players from Colorado")
+    preferences = parsed("I really want players from Colorado")
 
     assert preferences["preferred_teams"] == ["COL"]
     assert preferences["locked_players"] == []
 
 
 def test_parse_preferences_does_not_confuse_banned_and_preferred_teams():
-    preferences = parse_preferences("avoid Edmonton but prioritize Colorado")
+    preferences = parsed("avoid Edmonton but prioritize Colorado")
 
     assert preferences["banned_teams"] == ["EDM"]
     assert preferences["preferred_teams"] == ["COL"]
 
 
 def test_parse_preferences_detects_safe_lineup():
-    preferences = parse_preferences("Give me a safe lineup")
+    preferences = parsed("Give me a safe lineup")
 
     assert preferences["risk_mode"] == "safe"
-    assert parse_preferences("I want low risk picks")["risk_mode"] == "safe"
-    assert parse_preferences("Give me consistent players")["risk_mode"] == "safe"
+    assert parsed("I want low risk picks")["risk_mode"] == "safe"
+    assert parsed("Give me consistent players")["risk_mode"] == "safe"
 
 
 def test_parse_preferences_detects_risky_lineup():
-    preferences = parse_preferences("Build a risky lineup")
+    preferences = parsed("Build a risky lineup")
 
     assert preferences["risk_mode"] == "risky"
-    assert parse_preferences("I want high upside picks")["risk_mode"] == "risky"
-    assert parse_preferences("Give me a boom or bust lineup")["risk_mode"] == "risky"
+    assert parsed("I want high upside picks")["risk_mode"] == "risky"
+    assert parsed("Give me a boom or bust lineup")["risk_mode"] == "risky"
 
 
 def test_parse_preferences_detects_contrarian_strategy():
-    assert parse_preferences("I want a contrarian build")["strategy"] == "contrarian"
-    assert parse_preferences("Find me a sleeper pick")["strategy"] == "contrarian"
-    assert parse_preferences("Make it unique")["strategy"] == "contrarian"
-    assert parse_preferences("Give me something different")["strategy"] == "contrarian"
+    assert parsed("I want a contrarian build")["strategy"] == "contrarian"
+    assert parsed("Find me a sleeper pick")["strategy"] == "contrarian"
+    assert parsed("Make it unique")["strategy"] == "contrarian"
+    assert parsed("Give me something different")["strategy"] == "contrarian"
 
 
 def test_parse_preferences_detects_chalk_strategy():
-    assert parse_preferences("Use popular picks")["strategy"] == "chalk"
-    assert parse_preferences("Give me chalk")["strategy"] == "chalk"
-    assert parse_preferences("Use obvious picks")["strategy"] == "chalk"
+    assert parsed("Use popular picks")["strategy"] == "chalk"
+    assert parsed("Give me chalk")["strategy"] == "chalk"
+    assert parsed("Use obvious picks")["strategy"] == "chalk"
 
 
 def test_parse_preferences_detects_avoid_expensive():
-    assert parse_preferences("avoid expensive players")["avoid_expensive"] is True
-    assert parse_preferences("Give me cheap options")["avoid_expensive"] is True
-    assert parse_preferences("Build around low salary picks")["avoid_expensive"] is True
+    assert parsed("avoid expensive players")["avoid_expensive"] is True
+    assert parsed("Give me cheap options")["avoid_expensive"] is True
+    assert parsed("Build around low salary picks")["avoid_expensive"] is True
 
 
 def test_parse_preferences_can_combine_rules():
-    preferences = parse_preferences("Safe lineup, I want Makar and avoid Boston")
+    preferences = parsed("Safe lineup, I want Makar and avoid Boston")
 
     assert preferences["locked_players"] == ["Cale Makar"]
     assert preferences["banned_teams"] == ["BOS"]
@@ -171,3 +184,50 @@ def test_parse_preferences_can_combine_rules():
 def test_parse_preferences_rejects_non_string_input():
     with pytest.raises(ValueError, match="user_text must be a string"):
         parse_preferences(None)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "I want lots of Colorado players.",
+        "I want a fun lineup.",
+        "Give me a unique team.",
+        "I don't mind taking some risks.",
+        "Try to stack one team.",
+        "I like Edmonton.",
+    ],
+)
+def test_parse_preferences_triggers_clarification_for_ambiguous_prompts(prompt):
+    result = parse_preferences(prompt)
+
+    assert result["clarification_needed"] is True
+    assert result["clarification_question"]
+    assert result["clarification_options"]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "avoid Toronto",
+        "I really want McDavid",
+        "prefer Colorado",
+        "Build a risky lineup",
+        "Give me chalk",
+    ],
+)
+def test_parse_preferences_does_not_clarify_unambiguous_prompts(prompt):
+    result = parse_preferences(prompt)
+
+    assert result["clarification_needed"] is False
+    assert result["clarification_question"] is None
+
+
+def test_optimization_proceeds_after_clarifying_preferred_team():
+    result = parse_preferences("I want lots of Colorado players.")
+    preferences = extract_parsed_preferences(result)
+    preferences["preferred_teams"] = ["COL"]
+
+    optimized = optimize_lineup(preferences)
+
+    assert optimized["lineup"]
+    assert "Preferred teams considered: COL" in optimized["tradeoff_explanation"]

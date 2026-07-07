@@ -9,7 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.preference_parser import parse_preferences
+from agent.preference_parser import extract_parsed_preferences, parse_preferences
 from tools.data_intake import (
     check_optimization_readiness,
     load_uploaded_pool,
@@ -65,6 +65,83 @@ def clear_invalid_selection(key: str, valid_options: list[str]) -> None:
     st.session_state[key] = [
         value for value in st.session_state[key] if value in valid
     ]
+
+
+def apply_clarification(
+    preferences: dict[str, object],
+    answer: str,
+) -> tuple[dict[str, object], str]:
+    """Apply a clarification answer to parsed preferences."""
+    updated = {key: value for key, value in preferences.items()}
+    explanation = f"You clarified: {answer}."
+
+    if answer.startswith("Prioritize "):
+        team_name = answer.removeprefix("Prioritize ")
+        team_lookup = {
+            "Colorado": "COL",
+            "Edmonton": "EDM",
+            "Toronto": "TOR",
+            "Winnipeg": "WPG",
+            "Boston": "BOS",
+        }
+        team_code = team_lookup.get(team_name)
+        if team_code is not None:
+            preferred_teams = format_list(updated.get("preferred_teams", []))
+            if team_code not in preferred_teams:
+                preferred_teams.append(team_code)
+            updated["preferred_teams"] = preferred_teams
+            explanation = (
+                f"You asked to prioritize {team_name} players rather than requiring them. "
+                "The optimizer treated that as a moderate preferred-team bonus."
+            )
+    elif answer in {"High upside", "Use risky mode"}:
+        updated["risk_mode"] = "risky"
+        explanation = "You clarified that you want more upside, so I used risky mode."
+    elif answer in {"Use safe mode"}:
+        updated["risk_mode"] = "safe"
+        explanation = "You clarified that you want safer picks, so I used safe mode."
+    elif answer in {"Contrarian picks"}:
+        updated["strategy"] = "contrarian"
+        explanation = "You clarified that unique means contrarian, so I favored lower-popularity picks."
+    elif answer in {"Balanced lineup", "Stay balanced", "Choose balanced lineup"}:
+        updated["risk_mode"] = "balanced"
+        updated["strategy"] = "balanced"
+        explanation = "You clarified that I should keep the recommendation balanced."
+
+    return updated, explanation
+
+
+def build_preferences(
+    parsed_preferences: dict[str, object],
+    locked_players: list[str],
+    banned_teams: list[str],
+    banned_players: list[str],
+    preferred_teams: list[str],
+    risk_mode: str,
+    strategy: str,
+) -> dict[str, object]:
+    """Merge parsed preferences with UI-selected preferences."""
+    return {
+        "locked_players": merge_unique(
+            parsed_preferences.get("locked_players", []),
+            locked_players,
+        ),
+        "banned_teams": merge_unique(
+            parsed_preferences.get("banned_teams", []),
+            banned_teams,
+        ),
+        "banned_players": merge_unique(
+            parsed_preferences.get("banned_players", []),
+            banned_players,
+        ),
+        "preferred_teams": merge_unique(
+            parsed_preferences.get("preferred_teams", []),
+            preferred_teams,
+        ),
+        "risk_mode": risk_mode,
+        "strategy": strategy,
+        "avoid_expensive": parsed_preferences.get("avoid_expensive", False),
+    }
 
 
 uploaded_csv = st.file_uploader("Upload box pool CSV", type=["csv"])
@@ -168,72 +245,97 @@ if optimize_clicked:
         st.stop()
 
     try:
-        parsed_preferences = parse_preferences(user_text)
-        preferences = {
-            "locked_players": merge_unique(
-                parsed_preferences.get("locked_players", []),
-                locked_players,
-            ),
-            "banned_teams": merge_unique(
-                parsed_preferences.get("banned_teams", []),
-                banned_teams,
-            ),
-            "banned_players": merge_unique(
-                parsed_preferences.get("banned_players", []),
-                banned_players,
-            ),
-            "preferred_teams": merge_unique(
-                parsed_preferences.get("preferred_teams", []),
-                preferred_teams,
-            ),
-            "risk_mode": risk_mode,
-            "strategy": strategy,
-            "avoid_expensive": parsed_preferences.get("avoid_expensive", False),
-        }
-        result = optimize_lineup(preferences, pool_df=pool_df)
+        parse_result = parse_preferences(user_text)
+        parsed_preferences = extract_parsed_preferences(parse_result)
+        preferences = build_preferences(
+            parsed_preferences,
+            locked_players,
+            banned_teams,
+            banned_players,
+            preferred_teams,
+            risk_mode,
+            strategy,
+        )
+        if parse_result["clarification_needed"]:
+            st.session_state["pending_clarification"] = {
+                "question": parse_result["clarification_question"],
+                "options": parse_result["clarification_options"],
+                "preferences": preferences,
+            }
+        else:
+            st.session_state.pop("pending_clarification", None)
+            st.session_state.pop("clarification_explanation", None)
     except ValueError as exc:
         st.error(str(exc))
+        st.stop()
+
+if "pending_clarification" in st.session_state:
+    pending = st.session_state["pending_clarification"]
+    st.subheader("Clarification Needed")
+    st.write(pending["question"])
+    clarification_answer = st.selectbox(
+        "Choose how to interpret this request",
+        pending["options"],
+    )
+    if st.button("Apply clarification and optimize", type="primary"):
+        preferences, clarification_explanation = apply_clarification(
+            pending["preferences"],
+            clarification_answer,
+        )
+        st.session_state["clarification_explanation"] = clarification_explanation
+        st.session_state.pop("pending_clarification", None)
+        result = optimize_lineup(preferences, pool_df=pool_df)
     else:
-        st.subheader("Interpreted Preferences")
-        st.write(
-            {
-                "locked_players": format_list(preferences["locked_players"]),
-                "banned_players": format_list(preferences["banned_players"]),
-                "banned_teams": format_list(preferences["banned_teams"]),
-                "preferred_teams": format_list(preferences["preferred_teams"]),
-                "risk_mode": preferences["risk_mode"],
-                "strategy": preferences["strategy"],
-                "avoid_expensive": preferences["avoid_expensive"],
-            }
-        )
+        st.stop()
+elif optimize_clicked:
+    result = optimize_lineup(preferences, pool_df=pool_df)
+else:
+    result = None
 
-        st.subheader("Recommended Lineup")
-        lineup_rows = [
-            {
-                "box": player["box"],
-                "name": player["name"],
-                "team": player["team"],
-                "position": player["position"],
-                "projected_points": player["projected_points"],
-                "risk": player["risk"],
-                "injury_status": player["injury_status"],
-                "popularity": player["popularity"],
-                "salary": player["salary"],
-                "adjusted_score": player["adjusted_score"],
-            }
-            for player in sorted(result["lineup"], key=box_sort_key)
-        ]
-        st.dataframe(lineup_rows, hide_index=True, use_container_width=True)
+if result is not None:
+    st.subheader("Interpreted Preferences")
+    st.write(
+        {
+            "locked_players": format_list(preferences["locked_players"]),
+            "banned_players": format_list(preferences["banned_players"]),
+            "banned_teams": format_list(preferences["banned_teams"]),
+            "preferred_teams": format_list(preferences["preferred_teams"]),
+            "risk_mode": preferences["risk_mode"],
+            "strategy": preferences["strategy"],
+            "avoid_expensive": preferences["avoid_expensive"],
+        }
+    )
 
-        projected_col, adjusted_col = st.columns(2)
-        projected_col.metric(
-            "Total Projected Points",
-            result["total_projected_points"],
-        )
-        adjusted_col.metric(
-            "Total Adjusted Score",
-            result["total_adjusted_score"],
-        )
+    if "clarification_explanation" in st.session_state:
+        st.info(st.session_state["clarification_explanation"])
 
-        st.subheader("Explanation")
-        st.write(result["tradeoff_explanation"])
+    st.subheader("Recommended Lineup")
+    lineup_rows = [
+        {
+            "box": player["box"],
+            "name": player["name"],
+            "team": player["team"],
+            "position": player["position"],
+            "projected_points": player["projected_points"],
+            "risk": player["risk"],
+            "injury_status": player["injury_status"],
+            "popularity": player["popularity"],
+            "salary": player["salary"],
+            "adjusted_score": player["adjusted_score"],
+        }
+        for player in sorted(result["lineup"], key=box_sort_key)
+    ]
+    st.dataframe(lineup_rows, hide_index=True, use_container_width=True)
+
+    projected_col, adjusted_col = st.columns(2)
+    projected_col.metric(
+        "Total Projected Points",
+        result["total_projected_points"],
+    )
+    adjusted_col.metric(
+        "Total Adjusted Score",
+        result["total_adjusted_score"],
+    )
+
+    st.subheader("Explanation")
+    st.write(result["tradeoff_explanation"])

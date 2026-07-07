@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.preference_parser import parse_preferences
+from agent.preference_parser import extract_parsed_preferences, parse_preferences
 from tools.optimizer import optimize_lineup
 from tools.validators import validate_preferences
 
@@ -19,7 +19,7 @@ def test_invalid_risk_mode_raises_error():
 
 
 def test_avoid_toronto_maps_to_tor():
-    preferences = parse_preferences("avoid Toronto")
+    preferences = extract_parsed_preferences(parse_preferences("avoid Toronto"))
 
     assert preferences["banned_teams"] == ["TOR"]
 
