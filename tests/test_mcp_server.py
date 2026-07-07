@@ -37,6 +37,37 @@ def test_optimize_lineup_tool_returns_lineup_result():
     assert "tradeoff_explanation" in result
 
 
+def test_optimize_lineup_tool_accepts_pool_records():
+    pool_records = [
+        {
+            "box": 1,
+            "name": "Player One",
+            "team": "EDM",
+            "projected_points": 10,
+        },
+        {
+            "box": 1,
+            "name": "Player Two",
+            "team": "COL",
+            "projected_points": 12,
+        },
+    ]
+
+    result = optimize_lineup_tool(
+        {
+            "locked_players": [],
+            "banned_players": [],
+            "banned_teams": [],
+            "preferred_teams": [],
+            "risk_mode": "balanced",
+            "strategy": "balanced",
+        },
+        pool_records=pool_records,
+    )
+
+    assert result["lineup"][0]["name"] == "Player Two"
+
+
 def test_explain_tradeoffs_tool_returns_summary_fields():
     result = explain_tradeoffs_tool(
         {
@@ -53,6 +84,31 @@ def test_explain_tradeoffs_tool_returns_summary_fields():
         "total_adjusted_score",
     }
     assert "selected" in result["tradeoff_explanation"]
+
+
+def test_explain_tradeoffs_tool_accepts_pool_records():
+    pool_records = [
+        {
+            "box": 1,
+            "name": "Player One",
+            "team": "EDM",
+            "projected_points": 10,
+        },
+    ]
+
+    result = explain_tradeoffs_tool(
+        {
+            "locked_players": [],
+            "banned_players": [],
+            "banned_teams": [],
+            "preferred_teams": [],
+            "risk_mode": "balanced",
+            "strategy": "balanced",
+        },
+        pool_records=pool_records,
+    )
+
+    assert result["total_projected_points"] == 10
 
 
 def test_create_server_reports_missing_mcp_sdk_when_not_installed(monkeypatch):

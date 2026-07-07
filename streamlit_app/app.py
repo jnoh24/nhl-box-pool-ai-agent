@@ -9,13 +9,18 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from agent.preference_parser import extract_parsed_preferences, parse_preferences
+from agent.preference_parser import extract_parsed_preferences
+from streamlit_app.mcp_client import (
+    MCPClientError,
+    call_optimize_lineup,
+    call_parse_preferences,
+)
 from streamlit_app.team_background import render_team_background_selector
 from tools.data_intake import (
     check_optimization_readiness,
     load_uploaded_pool,
 )
-from tools.optimizer import DEFAULT_CSV_PATH, optimize_lineup
+from tools.optimizer import DEFAULT_CSV_PATH
 
 
 st.set_page_config(page_title="NHL Box Pool Preference Agent")
@@ -171,6 +176,7 @@ except ValueError as exc:
 st.caption(f"Using {active_dataset_name}")
 
 readiness = check_optimization_readiness(pool_df)
+pool_records = pool_df.to_dict(orient="records")
 available_teams = sorted(str(team) for team in pool_df["team"].dropna().unique())
 available_players = sorted(str(name) for name in pool_df["name"].dropna().unique())
 clear_invalid_selection("preferred_teams", available_teams)
@@ -256,7 +262,7 @@ if optimize_clicked:
         st.stop()
 
     try:
-        parse_result = parse_preferences(user_text)
+        parse_result = call_parse_preferences(user_text)
         parsed_preferences = extract_parsed_preferences(parse_result)
         preferences = build_preferences(
             parsed_preferences,
@@ -276,7 +282,7 @@ if optimize_clicked:
         else:
             st.session_state.pop("pending_clarification", None)
             st.session_state.pop("clarification_explanation", None)
-    except ValueError as exc:
+    except (MCPClientError, ValueError) as exc:
         st.error(str(exc))
         st.stop()
 
@@ -295,11 +301,19 @@ if "pending_clarification" in st.session_state:
         )
         st.session_state["clarification_explanation"] = clarification_explanation
         st.session_state.pop("pending_clarification", None)
-        result = optimize_lineup(preferences, pool_df=pool_df)
+        try:
+            result = call_optimize_lineup(preferences, pool_records)
+        except (MCPClientError, ValueError) as exc:
+            st.error(str(exc))
+            st.stop()
     else:
         st.stop()
 elif optimize_clicked:
-    result = optimize_lineup(preferences, pool_df=pool_df)
+    try:
+        result = call_optimize_lineup(preferences, pool_records)
+    except (MCPClientError, ValueError) as exc:
+        st.error(str(exc))
+        st.stop()
 else:
     result = None
 

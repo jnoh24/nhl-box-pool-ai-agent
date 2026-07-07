@@ -4,13 +4,22 @@ The plain Python tool functions are kept importable for tests and local use.
 `create_server` wires those functions into the Python MCP SDK.
 """
 
+import pandas as pd
+
 from agent.preference_parser import parse_preferences
 from tools.optimizer import optimize_lineup
 
 
-def optimize_lineup_tool(preferences: dict[str, object]) -> dict[str, object]:
+def optimize_lineup_tool(
+    preferences: dict[str, object],
+    pool_records: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     """Return an optimized lineup for structured preferences."""
-    return optimize_lineup(preferences)
+    if pool_records is None:
+        return optimize_lineup(preferences)
+
+    pool_df = pd.DataFrame(pool_records)
+    return optimize_lineup(preferences, pool_df=pool_df)
 
 
 def parse_preferences_tool(user_text: str) -> dict[str, object]:
@@ -18,9 +27,12 @@ def parse_preferences_tool(user_text: str) -> dict[str, object]:
     return parse_preferences(user_text)
 
 
-def explain_tradeoffs_tool(preferences: dict[str, object]) -> dict[str, object]:
+def explain_tradeoffs_tool(
+    preferences: dict[str, object],
+    pool_records: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
     """Return a concise explanation of optimizer tradeoffs."""
-    result = optimize_lineup(preferences)
+    result = optimize_lineup_tool(preferences, pool_records)
     return {
         "tradeoff_explanation": result["tradeoff_explanation"],
         "total_projected_points": result["total_projected_points"],
