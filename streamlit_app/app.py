@@ -10,6 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from agent.preference_parser import extract_parsed_preferences, parse_preferences
+from streamlit_app.team_background import render_team_background_selector
 from tools.data_intake import (
     check_optimization_readiness,
     load_uploaded_pool,
@@ -19,7 +20,17 @@ from tools.optimizer import DEFAULT_CSV_PATH, optimize_lineup
 
 st.set_page_config(page_title="NHL Box Pool Preference Agent")
 
+favorite_team = render_team_background_selector()
+
 st.title("NHL Box Pool Preference Agent")
+st.caption(f"Background theme: {favorite_team}")
+st.info(
+    "Upload your NHL box pool CSV or use the demo dataset. At minimum, include "
+    "box, name, and team; add projected_points to enable optimization. "
+    "Optional risk and popularity columns unlock safe/risky and chalk/contrarian "
+    "strategy modes. Then use the prompt and preference controls to lock, ban, "
+    "prioritize, and optimize your lineup."
+)
 
 
 @st.cache_data
